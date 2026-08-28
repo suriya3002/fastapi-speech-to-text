@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastAPI Speech to Text • Local Whisper Base Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 0.3; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .animate-pulse-ring {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-indigo-50/40 to-slate-100 min-h-screen text-slate-800 flex flex-col">
+
+    <!-- Top Navigation Bar -->
+    <header class="w-full border-b border-slate-200/80 bg-white/80 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+                    <i class="fa-solid fa-microphone-lines text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-display font-bold text-lg leading-tight text-slate-900">SpeechFlow AI</h1>
+                    <p class="text-xs text-slate-500 font-medium">Whisper Base Multilingual Studio</p>
+                </div>
+            </div>
+
+            <!-- Engine Status Badge -->
+            <div class="flex items-center gap-3">
+                <div id="status-pill" class="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-pointer hover:bg-emerald-100 transition shadow-sm" onclick="openStatusModal()">
+                    <span id="status-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="status-text">Local Whisper Base (Offline)</span>
+                    <i class="fa-solid fa-circle-info text-emerald-500 ml-1"></i>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
+
+        <!-- Hero Section -->
+        <div class="text-center max-w-2xl mx-auto space-y-2">
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 mb-1">
+                <i class="fa-solid fa-globe text-xs"></i> 99+ Languages Supported &bull; 100% Free &amp; Offline
+            </div>
+            <h2 class="font-display text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                Whisper <span class="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">Base Multilingual</span> Studio
+            </h2>
+            <p class="text-sm sm:text-base text-slate-600">
+                Transcribe and translate speech in 99+ languages locally on your machine with zero API keys or cloud credits required.
+            </p>
+        </div>
+
+        <!-- Mode Tabs -->
+        <div class="flex justify-center">
+            <div class="bg-slate-200/70 p-1.5 rounded-2xl flex gap-1 shadow-inner border border-slate-200 max-w-md w-full">
+                <button id="tab-upload" class="tab-btn flex-1 py-2.5 px-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 bg-white text-indigo-600 shadow-sm" onclick="switchTab('upload')">
+                    <i class="fa-solid fa-file-audio"></i>
+                    <span>Upload File</span>
+                </button>
+                <button id="tab-record" class="tab-btn flex-1 py-2.5 px-3 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-2" onclick="switchTab('record')">
+                    <i class="fa-solid fa-microphone"></i>
+                    <span>Record Mic</span>
+                </button>
+                <button id="tab-live" class="tab-btn flex-1 py-2.5 px-3 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-2" onclick="switchTab('live')">
+                    <i class="fa-solid fa-bolt text-amber-500"></i>
+                    <span>Live Stream</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Language & Task Settings Bar -->
+        <div class="max-w-3xl mx-auto glass-card rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-2 flex-1 min-w-[200px]">
+                <label for="global-lang-select" class="text-xs font-bold text-slate-700 whitespace-nowrap">
+                    <i class="fa-solid fa-language text-indigo-600 mr-1"></i> Language:
+                </label>
+                <select id="global-lang-select" class="bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full shadow-sm">
+                    <option value="auto" selected>✨ Auto-Detect Language (99+ Languages)</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="es">🇪🇸 Spanish</option>
+                    <option value="fr">🇫🇷 French</option>
+                    <option value="de">🇩🇪 German</option>
+                    <option value="hi">🇮🇳 Hindi</option>
+                    <option value="ta">🇮🇳 Tamil</option>
+                    <option value="te">🇮🇳 Telugu</option>
+                    <option value="bn">🇮🇳 Bengali</option>
+                    <option value="mr">🇮🇳 Marathi</option>
+                    <option value="gu">🇮🇳 Gujarati</option>
+                    <option value="ur">🇵🇰 Urdu</option>
+                    <option value="ar">🇸🇦 Arabic</option>
+                    <option value="zh">🇨🇳 Chinese</option>
+                    <option value="ja">🇯🇵 Japanese</option>
+                    <option value="ko">🇰🇷 Korean</option>
+                    <option value="pt">🇧🇷 Portuguese</option>
+                    <option value="ru">🇷🇺 Russian</option>
+                    <option value="it">🇮🇹 Italian</option>
+                    <option value="tr">🇹🇷 Turkish</option>
+                    <option value="id">🇮🇩 Indonesian</option>
+                </select>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <label for="global-task-select" class="text-xs font-bold text-slate-700 whitespace-nowrap">
+                    <i class="fa-solid fa-arrows-rotate text-indigo-600 mr-1"></i> Task:
+                </label>
+                <select id="global-task-select" class="bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm">
+                    <option value="transcribe" selected>Transcribe (Original Language)</option>
+                    <option value="translate">Translate to English</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Panels -->
+        <div class="max-w-3xl mx-auto">
+            
+            <!-- PANEL 1: File Upload -->
+            <div id="panel-upload" class="glass-card rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 space-y-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-display text-xl font-bold text-slate-900">Upload Audio File</h3>
+                        <p class="text-xs text-slate-500">Supports MP3, WAV, M4A, WEBM, OGG, FLAC (Whisper Base Multilingual)</p>
+                    </div>
+                    <span class="p-2.5 rounded-2xl bg-indigo-50 text-indigo-600">
+                        <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                    </span>
+                </div>
+
+                <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center hover:border-indigo-500 hover:bg-indigo-50/30 transition-all cursor-pointer group flex flex-col items-center justify-center min-h-[180px]">
+                    <input type="file" id="audio-file-input" accept="audio/*" class="hidden">
+                    <div class="w-14 h-14 rounded-2xl bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 transition mb-3">
+                        <i class="fa-solid fa-file-waveform text-2xl"></i>
+                    </div>
+                    <p class="text-sm font-medium text-slate-700">
+                        Drag and drop your audio file here, or <span class="text-indigo-600 font-semibold underline underline-offset-2">browse files</span>
+                    </p>
+                    <p id="selected-file-name" class="mt-2 text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full hidden"></p>
+                </div>
+
+                <div id="file-player-container" class="hidden bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-2">
+                    <div class="flex items-center justify-between text-xs text-slate-600 font-medium">
+                        <span id="player-file-title" class="truncate max-w-xs font-semibold">audio_sample.mp3</span>
+                        <span id="player-file-size" class="text-slate-400">2.4 MB</span>
+                    </div>
+                    <audio id="audio-player" controls class="w-full h-10 rounded-lg"></audio>
+                </div>
+
+                <button id="upload-transcribe-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-2xl shadow-lg shadow-indigo-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600" disabled onclick="handleFileUpload()">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span id="upload-btn-text">Transcribe with Whisper Base</span>
+                </button>
+            </div>
+
+            <!-- PANEL 2: Record Voice -->
+            <div id="panel-record" class="glass-card rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 space-y-6 hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-display text-xl font-bold text-slate-900">Record Microphone</h3>
+                        <p class="text-xs text-slate-500">Record high-fidelity voice note in any language</p>
+                    </div>
+                    <span class="p-2.5 rounded-2xl bg-rose-50 text-rose-600">
+                        <i class="fa-solid fa-microphone-lines text-xl"></i>
+                    </span>
+                </div>
+
+                <div class="bg-gradient-to-b from-slate-50 to-slate-100 rounded-2xl p-8 border border-slate-200 flex flex-col items-center justify-center space-y-6 min-h-[220px]">
+                    <div class="relative flex items-center justify-center">
+                        <div id="rec-pulse" class="absolute w-24 h-24 rounded-full bg-rose-400 opacity-0 pointer-events-none transition-all"></div>
+                        <button id="main-record-btn" class="relative z-10 w-20 h-20 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white shadow-xl shadow-rose-600/30 flex items-center justify-center transition-all" onclick="toggleMicrophoneRecording()">
+                            <i id="rec-icon" class="fa-solid fa-microphone text-2xl"></i>
+                        </button>
+                    </div>
+
+                    <div class="text-center space-y-1">
+                        <div id="rec-timer" class="font-mono text-3xl font-bold text-slate-800 tracking-wider">00:00</div>
+                        <p id="rec-status-label" class="text-xs font-medium text-slate-500">Tap microphone to start recording</p>
+                    </div>
+
+                    <canvas id="record-visualizer" class="w-full max-w-sm h-12 rounded-lg"></canvas>
+                </div>
+
+                <div id="recorded-preview-container" class="hidden bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-4">
+                    <div class="flex items-center justify-between text-xs text-slate-600">
+                        <span class="font-semibold text-slate-700">Recorded Audio Clip</span>
+                        <span id="recorded-duration-text" class="text-slate-500">00:15</span>
+                    </div>
+                    <audio id="recorded-audio-player" controls class="w-full h-10 rounded-lg"></audio>
+                    <button id="transcribe-recorded-btn" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md shadow-rose-600/20 transition flex items-center justify-center gap-2" onclick="transcribeRecordedAudio()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span id="transcribe-rec-btn-text">Transcribe Recorded Clip</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- PANEL 3: Real-Time Live Dictation -->
+            <div id="panel-live" class="glass-card rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 space-y-6 hidden">
+                <div class="flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                        <h3 class="font-display text-xl font-bold text-slate-900">Live Speech Dictation</h3>
+                        <p class="text-xs text-slate-500">Instant word streaming as you speak</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <button id="live-dictation-btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-2xl shadow-lg shadow-emerald-600/25 transition flex items-center justify-center gap-2" onclick="toggleLiveDictation()">
+                        <i id="live-mic-icon" class="fa-solid fa-microphone"></i>
+                        <span id="live-btn-label">Start Live Dictation</span>
+                    </button>
+                    <button id="live-clear-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-3.5 px-5 rounded-2xl transition flex items-center gap-2" onclick="clearLiveTranscription()">
+                        <i class="fa-solid fa-trash-can text-sm"></i>
+                        <span>Clear</span>
+                    </button>
+                </div>
+
+                <div class="bg-slate-900 rounded-2xl p-5 border border-slate-800 text-slate-100 min-h-[180px] max-h-[260px] overflow-y-auto relative flex flex-col justify-between shadow-inner">
+                    <div id="live-stream-text" class="text-sm leading-relaxed whitespace-pre-wrap font-normal text-slate-200">
+                        <span class="text-slate-500 italic">Click "Start Live Dictation" and speak into your microphone...</span>
+                    </div>
+                    <div id="live-interim-text" class="text-xs text-emerald-400 italic mt-2 font-medium"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- TRANSCRIPT RESULTS SECTION -->
+        <div id="result-station" class="max-w-3xl mx-auto glass-card rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 space-y-5 border border-indigo-100 hidden">
+            
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200/80">
+                <div class="flex items-center gap-3">
+                    <span class="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-bold">
+                        <i class="fa-solid fa-align-left"></i>
+                    </span>
+                    <div>
+                        <h3 class="font-display font-bold text-lg text-slate-900">Transcription Result</h3>
+                        <div class="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                            <span id="res-engine-tag" class="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-semibold">Local Whisper Base</span>
+                            <span id="res-lang-tag" class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-semibold">🌐 en (100%)</span>
+                            <span id="res-duration-tag" class="text-slate-400">• 1.4s</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button id="copy-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 px-3.5 rounded-xl transition flex items-center gap-1.5" onclick="copyTranscriptToClipboard()">
+                        <i class="fa-regular fa-copy"></i>
+                        <span id="copy-btn-text">Copy Text</span>
+                    </button>
+                    <button id="download-txt-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 px-3.5 rounded-xl shadow-sm transition flex items-center gap-1.5" onclick="downloadAsTXT()">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Download .TXT</span>
+                    </button>
+                    <button id="download-json-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 px-3 rounded-xl transition flex items-center gap-1.5" onclick="downloadAsJSON()">
+                        <i class="fa-solid fa-code"></i>
+                        <span>JSON</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="relative">
+                <textarea id="final-transcript-box" class="w-full h-56 p-4 rounded-2xl bg-slate-50/70 border border-slate-200 text-slate-800 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-normal" placeholder="Transcribed text appears here..."></textarea>
+            </div>
+
+            <div class="flex items-center justify-between text-xs text-slate-500 pt-1">
+                <div class="flex items-center gap-4">
+                    <span><strong id="stat-words" class="text-slate-700">0</strong> words</span>
+                    <span><strong id="stat-chars" class="text-slate-700">0</strong> characters</span>
+                </div>
+                <button class="text-rose-500 hover:text-rose-700 font-medium flex items-center gap-1" onclick="clearResults()">
+                    <i class="fa-solid fa-trash-can text-xs"></i>
+                    <span>Clear</span>
+                </button>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full border-t border-slate-200 bg-white/60 py-6 mt-auto">
+        <div class="max-w-6xl mx-auto px-4 text-center text-xs text-slate-500 space-y-1">
+            <p>FastAPI Speech to Text &bull; Powered by Local Whisper Base Multilingual Model</p>
+        </div>
+    </footer>
+
+    <!-- Status & Diagnostics Modal -->
+    <div id="status-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-slate-100">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <i class="fa-solid fa-sliders"></i>
+                    </div>
+                    <h3 class="font-display font-bold text-lg text-slate-900">Engine Details</h3>
+                </div>
+                <button class="text-slate-400 hover:text-slate-600 p-1" onclick="closeStatusModal()">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3 text-xs bg-slate-50 rounded-2xl p-4 border border-slate-200/80">
+                <div class="flex justify-between py-1 border-b border-slate-200">
+                    <span class="text-slate-500">Active Engine:</span>
+                    <span class="font-bold text-emerald-600">Local Whisper Base (Multilingual)</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-200">
+                    <span class="text-slate-500">Execution Mode:</span>
+                    <span class="font-semibold text-slate-800">Local CPU (int8 quantized)</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-200">
+                    <span class="text-slate-500">Language Support:</span>
+                    <span class="font-semibold text-slate-800">99+ Languages with Auto-Detection</span>
+                </div>
+                <div class="flex justify-between py-1">
+                    <span class="text-slate-500">Cost / Balance:</span>
+                    <span class="font-semibold text-emerald-600">100% Free (No API Key Required)</span>
+                </div>
+            </div>
+
+            <button class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2.5 rounded-xl transition text-xs" onclick="closeStatusModal()">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        let currentTab = 'upload';
+        let currentTranscriptData = null;
+
+        function switchTab(tab) {
+            currentTab = tab;
+            ['upload', 'record', 'live'].forEach(t => {
+                const btn = document.getElementById(`tab-${t}`);
+                const panel = document.getElementById(`panel-${t}`);
+                if (t === tab) {
+                    btn.className = "tab-btn flex-1 py-2.5 px-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 bg-white text-indigo-600 shadow-sm";
+                    panel.classList.remove('hidden');
+                } else {
+                    btn.className = "tab-btn flex-1 py-2.5 px-3 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-2";
+                    panel.classList.add('hidden');
+                }
+            });
+        }
+
+        async function checkBackendStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('status-text').textContent = `${data.provider} • ${data.model}`;
+            } catch (err) {
+                document.getElementById('status-text').textContent = "Server Connecting...";
+            }
+        }
+
+        function openStatusModal() {
+            document.getElementById('status-modal').classList.remove('hidden');
+        }
+        function closeStatusModal() {
+            document.getElementById('status-modal').classList.add('hidden');
+        }
+
+        // ==========================================
+        // TAB 1: File Upload Handling
+        // ==========================================
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('audio-file-input');
+        const selectedFileName = document.getElementById('selected-file-name');
+        const uploadBtn = document.getElementById('upload-transcribe-btn');
+        const uploadBtnText = document.getElementById('upload-btn-text');
+        const filePlayerContainer = document.getElementById('file-player-container');
+        const audioPlayer = document.getElementById('audio-player');
+        const playerFileTitle = document.getElementById('player-file-title');
+        const playerFileSize = document.getElementById('player-file-size');
+
+        let selectedFile = null;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-indigo-500', 'bg-indigo-50/50');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelection(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFileSelection(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelection(file) {
+            selectedFile = file;
+            selectedFileName.textContent = `Selected: ${file.name}`;
+            selectedFileName.classList.remove('hidden');
+
+            const objectUrl = URL.createObjectURL(file);
+            audioPlayer.src = objectUrl;
+            playerFileTitle.textContent = file.name;
+            playerFileSize.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+            filePlayerContainer.classList.remove('hidden');
+
+            uploadBtn.disabled = false;
+        }
+
+        async function handleFileUpload() {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            uploadBtnText.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Transcribing with Whisper Base...';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('language', document.getElementById('global-lang-select').value);
+            formData.append('task', document.getElementById('global-task-select').value);
+
+            try {
+                const response = await fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Transcription failed.');
+                }
+
+                displayTranscriptionResult(data);
+            } catch (err) {
+                alert('Transcription Error: ' + err.message);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtnText.innerHTML = 'Transcribe with Whisper Base';
+            }
+        }
+
+        // ==========================================
+        // TAB 2: Microphone Recording & Audio Wave
+        // ==========================================
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecordingMic = false;
+        let micTimerInterval = null;
+        let micStartTime = 0;
+        let recordedAudioBlob = null;
+
+        let audioContext = null;
+        let analyser = null;
+        let animFrameId = null;
+
+        const mainRecordBtn = document.getElementById('main-record-btn');
+        const recIcon = document.getElementById('rec-icon');
+        const recPulse = document.getElementById('rec-pulse');
+        const recTimer = document.getElementById('rec-timer');
+        const recStatusLabel = document.getElementById('rec-status-label');
+        const recordedPreviewContainer = document.getElementById('recorded-preview-container');
+        const recordedAudioPlayer = document.getElementById('recorded-audio-player');
+        const recordedDurationText = document.getElementById('recorded-duration-text');
+        const transcribeRecBtn = document.getElementById('transcribe-recorded-btn');
+        const transcribeRecBtnText = document.getElementById('transcribe-rec-btn-text');
+        const visualizerCanvas = document.getElementById('record-visualizer');
+
+        async function toggleMicrophoneRecording() {
+            if (!isRecordingMic) {
+                startMicRecording();
+            } else {
+                stopMicRecording();
+            }
+        }
+
+        async function startMicRecording() {
+            recordedChunks = [];
+            recordedAudioBlob = null;
+            recordedPreviewContainer.classList.add('hidden');
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    recordedAudioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    const audioUrl = URL.createObjectURL(recordedAudioBlob);
+                    recordedAudioPlayer.src = audioUrl;
+                    recordedPreviewContainer.classList.remove('hidden');
+                    recordedDurationText.textContent = recTimer.textContent;
+                };
+
+                mediaRecorder.start(250);
+                isRecordingMic = true;
+
+                mainRecordBtn.classList.remove('bg-rose-600', 'hover:bg-rose-700');
+                mainRecordBtn.classList.add('bg-slate-900', 'hover:bg-black');
+                recIcon.className = "fa-solid fa-stop text-2xl";
+                recPulse.classList.remove('opacity-0');
+                recPulse.classList.add('animate-pulse-ring', 'opacity-100');
+                recStatusLabel.textContent = "Recording... Click stop when finished.";
+
+                micStartTime = Date.now();
+                recTimer.textContent = "00:00";
+                micTimerInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - micStartTime) / 1000);
+                    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                    const secs = String(elapsed % 60).padStart(2, '0');
+                    recTimer.textContent = `${mins}:${secs}`;
+                }, 1000);
+
+                startAudioVisualizer(stream);
+
+            } catch (err) {
+                alert('Microphone access error: ' + err.message);
+            }
+        }
+
+        function stopMicRecording() {
+            if (!isRecordingMic || !mediaRecorder) return;
+
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            isRecordingMic = false;
+
+            clearInterval(micTimerInterval);
+            stopAudioVisualizer();
+
+            mainRecordBtn.classList.remove('bg-slate-900', 'hover:bg-black');
+            mainRecordBtn.classList.add('bg-rose-600', 'hover:bg-rose-700');
+            recIcon.className = "fa-solid fa-microphone text-2xl";
+            recPulse.classList.remove('animate-pulse-ring', 'opacity-100');
+            recPulse.classList.add('opacity-0');
+            recStatusLabel.textContent = "Recording stopped. Ready to transcribe.";
+        }
+
+        function startAudioVisualizer(stream) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+            analyser.fftSize = 64;
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const canvasCtx = visualizerCanvas.getContext('2d');
+
+            function draw() {
+                animFrameId = requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                canvasCtx.fillStyle = '#f1f5f9';
+                canvasCtx.fillRect(0, 0, visualizerCanvas.width, visualizerCanvas.height);
+
+                const barWidth = (visualizerCanvas.width / bufferLength) * 1.8;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const barHeight = (dataArray[i] / 255) * visualizerCanvas.height;
+                    canvasCtx.fillStyle = '#f43f5e';
+                    canvasCtx.beginPath();
+                    canvasCtx.roundRect(x, visualizerCanvas.height - barHeight, barWidth - 2, barHeight, 3);
+                    canvasCtx.fill();
+                    x += barWidth;
+                }
+            }
+            draw();
+        }
+
+        function stopAudioVisualizer() {
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+            if (audioContext) audioContext.close();
+            const canvasCtx = visualizerCanvas.getContext('2d');
+            canvasCtx.clearRect(0, 0, visualizerCanvas.width, visualizerCanvas.height);
+        }
+
+        async function transcribeRecordedAudio() {
+            if (!recordedAudioBlob) return;
+
+            transcribeRecBtn.disabled = true;
+            transcribeRecBtnText.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Transcribing...';
+
+            const formData = new FormData();
+            formData.append('file', recordedAudioBlob, 'voice_recording.webm');
+            formData.append('language', document.getElementById('global-lang-select').value);
+            formData.append('task', document.getElementById('global-task-select').value);
+
+            try {
+                const response = await fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Transcription failed.');
+                }
+
+                displayTranscriptionResult(data);
+            } catch (err) {
+                alert('Transcription Error: ' + err.message);
+            } finally {
+                transcribeRecBtn.disabled = false;
+                transcribeRecBtnText.textContent = 'Transcribe Recorded Clip';
+            }
+        }
+
+        // ==========================================
+        // TAB 3: Live Real-Time Dictation
+        // ==========================================
+        let recognition = null;
+        let isLiveDictating = false;
+        let fullLiveTranscript = "";
+
+        const liveDictationBtn = document.getElementById('live-dictation-btn');
+        const liveBtnLabel = document.getElementById('live-btn-label');
+        const liveMicIcon = document.getElementById('live-mic-icon');
+        const liveStreamText = document.getElementById('live-stream-text');
+        const liveInterimText = document.getElementById('live-interim-text');
+
+        function toggleLiveDictation() {
+            if (!isLiveDictating) {
+                startLiveDictation();
+            } else {
+                stopLiveDictation();
+            }
+        }
+
+        function startLiveDictation() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert('Your browser does not support native Web Speech Recognition. Please use Chrome, Edge, or Safari.');
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            
+            const selectedLang = document.getElementById('global-lang-select').value;
+            recognition.lang = selectedLang === 'auto' ? 'en-US' : selectedLang;
+
+            recognition.onstart = () => {
+                isLiveDictating = true;
+                liveDictationBtn.className = "flex-1 bg-rose-600 hover:bg-rose-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-2xl shadow-lg shadow-rose-600/25 transition flex items-center justify-center gap-2";
+                liveBtnLabel.textContent = "Stop Live Dictation";
+                liveMicIcon.className = "fa-solid fa-stop animate-pulse";
+                if (!fullLiveTranscript) {
+                    liveStreamText.innerHTML = "";
+                }
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = "";
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        fullLiveTranscript += event.results[i][0].transcript + " ";
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                liveStreamText.textContent = fullLiveTranscript;
+                liveInterimText.textContent = interimTranscript ? `... ${interimTranscript}` : "";
+
+                updateTranscriptionStats(fullLiveTranscript);
+                document.getElementById('final-transcript-box').value = fullLiveTranscript;
+                document.getElementById('result-station').classList.remove('hidden');
+                document.getElementById('res-engine-tag').textContent = "Web Speech (Live)";
+                document.getElementById('res-lang-tag').textContent = `🌐 ${recognition.lang}`;
+                document.getElementById('res-duration-tag').textContent = "Real-time";
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech Recognition Error:", event.error);
+                if (event.error === 'not-allowed') {
+                    alert('Microphone permission denied. Please allow microphone access in your browser.');
+                    stopLiveDictation();
+                }
+            };
+
+            recognition.onend = () => {
+                if (isLiveDictating) {
+                    try {
+                        recognition.start();
+                    } catch (e) {}
+                }
+            };
+
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function stopLiveDictation() {
+            isLiveDictating = false;
+            if (recognition) {
+                recognition.stop();
+            }
+            liveDictationBtn.className = "flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold py-3.5 px-6 rounded-2xl shadow-lg shadow-emerald-600/25 transition flex items-center justify-center gap-2";
+            liveBtnLabel.textContent = "Start Live Dictation";
+            liveMicIcon.className = "fa-solid fa-microphone";
+            liveInterimText.textContent = "";
+        }
+
+        function clearLiveTranscription() {
+            fullLiveTranscript = "";
+            liveStreamText.innerHTML = '<span class="text-slate-500 italic">Click "Start Live Dictation" and speak into your microphone...</span>';
+            liveInterimText.textContent = "";
+        }
+
+        // ==========================================
+        // TRANSCRIPT RESULTS & EXPORT
+        // ==========================================
+        const resultStation = document.getElementById('result-station');
+        const finalTranscriptBox = document.getElementById('final-transcript-box');
+        const resEngineTag = document.getElementById('res-engine-tag');
+        const resLangTag = document.getElementById('res-lang-tag');
+        const resDurationTag = document.getElementById('res-duration-tag');
+        const statWords = document.getElementById('stat-words');
+        const statChars = document.getElementById('stat-chars');
+
+        finalTranscriptBox.addEventListener('input', (e) => {
+            updateTranscriptionStats(e.target.value);
+        });
+
+        function displayTranscriptionResult(data) {
+            currentTranscriptData = data;
+            finalTranscriptBox.value = data.text;
+            resEngineTag.textContent = data.engine || 'Local Whisper Base';
+            
+            const langCode = data.detected_language || 'auto';
+            const langProb = data.language_probability ? ` (${Math.round(data.language_probability * 100)}%)` : '';
+            resLangTag.textContent = `🌐 ${langCode.toUpperCase()}${langProb}`;
+            
+            resDurationTag.textContent = `• ${data.duration_seconds || 1.0}s`;
+            updateTranscriptionStats(data.text);
+            resultStation.classList.remove('hidden');
+            resultStation.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateTranscriptionStats(text) {
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            const chars = text.length;
+            statWords.textContent = words;
+            statChars.textContent = chars;
+        }
+
+        function copyTranscriptToClipboard() {
+            const text = finalTranscriptBox.value;
+            if (!text) return;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const copyBtnText = document.getElementById('copy-btn-text');
+                const orig = copyBtnText.textContent;
+                copyBtnText.textContent = "Copied!";
+                setTimeout(() => copyBtnText.textContent = orig, 2000);
+            });
+        }
+
+        function downloadAsTXT() {
+            const text = finalTranscriptBox.value;
+            if (!text) return;
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            downloadFile(blob, 'transcript.txt');
+        }
+
+        function downloadAsJSON() {
+            const text = finalTranscriptBox.value;
+            if (!text) return;
+            const payload = {
+                text: text,
+                detected_language: currentTranscriptData?.detected_language,
+                language_confidence: currentTranscriptData?.language_probability,
+                word_count: statWords.textContent,
+                char_count: statChars.textContent,
+                exported_at: new Date().toISOString(),
+                metadata: currentTranscriptData || {}
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            downloadFile(blob, 'transcript_export.json');
+        }
+
+        function downloadFile(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function clearResults() {
+            finalTranscriptBox.value = "";
+            updateTranscriptionStats("");
+            resultStation.classList.add('hidden');
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            checkBackendStatus();
+        });
+    </script>
+</body>
+</html>

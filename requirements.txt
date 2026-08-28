@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+openai
+jinja2
+SpeechRecognition
+soundfile
+faster-whisper
