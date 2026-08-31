@@ -165,8 +165,8 @@ async def convert_audio_to_text(
         raise HTTPException(status_code=400, detail="No audio file was selected.")
 
     allowed_exts = {
-        ".mp3", ".mpeg",".wav", ".m4a", ".ogg", ".flac",
-        ".webm", ".aac", ".mp4", ".wma", ".opus"
+        ".mp3", ".mpeg", ".mpg", ".mpga", ".wav", ".m4a", ".ogg", ".flac",
+        ".webm", ".aac", ".mp4", ".wma", ".opus", ".mka", ".3gp", ".amr", ".caf"
     }
     
     ext = os.path.splitext(file.filename)[1].lower()
