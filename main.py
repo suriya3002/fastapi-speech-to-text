@@ -10,8 +10,6 @@ from fastapi import (
     UploadFile,
     File,
     Form,
-    WebSocket,
-    WebSocketDisconnect,
     HTTPException,
 )
 from fastapi.templating import Jinja2Templates
@@ -20,458 +18,286 @@ from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 
 # --------------------------------------------------
-# Whisper Local Multilingual Model Setup
+# Config & Directories
 # --------------------------------------------------
+load_dotenv()
 
+MAX_FILE_SIZE_MB = 200
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024  # 200 MB limit
+
+UPLOAD_DIR = "uploads"
+OUTPUT_DIR = "output"
+STATIC_DIR = "static"
+TEMPLATES_DIR = "templates"
+
+for folder in [UPLOAD_DIR, OUTPUT_DIR, STATIC_DIR, TEMPLATES_DIR]:
+    os.makedirs(folder, exist_ok=True)
+
+# --------------------------------------------------
+# Whisper Model Management (Lightweight ~75MB - ~145MB)
+# --------------------------------------------------
+# Using faster-whisper with int8 quantization keeps memory & model files strictly < 200MB.
 whisper_model = None
 whisper_available = False
 
 try:
     from faster_whisper import WhisperModel
-    print("Loading local Whisper 'base' multilingual model (CPU int8)...")
+    print("Loading lightweight Whisper 'base' model (CPU int8, ~140MB)...")
     whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
     whisper_available = True
-    print("Local Whisper 'base' multilingual model loaded successfully!")
+    print("Whisper 'base' model loaded successfully!")
 except Exception as e:
-    print(f"Warning: Could not load local faster-whisper model: {e}")
+    print(f"Warning: Could not load faster-whisper: {e}")
     whisper_available = False
 
-# Optional fallback speech recognition
+# Fallback Google Speech Recognition if faster-whisper fails
 try:
     import speech_recognition as sr
     sr_available = True
 except ImportError:
     sr_available = False
 
-try:
-    import soundfile as sf
-    sf_available = True
-except ImportError:
-    sf_available = False
-
-
-# --------------------------------------------------
-# Configuration & Provider Setup
-# --------------------------------------------------
-
-load_dotenv()
-
+# Fallback OpenAI API client if configured
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-CUSTOM_BASE_URL = os.getenv("OPENAI_BASE_URL")
-
 API_KEY = OPENAI_API_KEY or OPENROUTER_API_KEY or GROQ_API_KEY
 openai_client = None
 
 if API_KEY:
     try:
         from openai import OpenAI
-        if CUSTOM_BASE_URL:
-            openai_client = OpenAI(api_key=API_KEY, base_url=CUSTOM_BASE_URL)
-        elif API_KEY.startswith("sk-or-") or OPENROUTER_API_KEY:
+        if API_KEY.startswith("sk-or-") or OPENROUTER_API_KEY:
             openai_client = OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
         elif API_KEY.startswith("gsk_") or GROQ_API_KEY:
             openai_client = OpenAI(api_key=API_KEY, base_url="https://api.groq.com/openai/v1")
         else:
             openai_client = OpenAI(api_key=API_KEY)
     except Exception as err:
-        print(f"Cloud OpenAI client init error: {err}")
         openai_client = None
-
 
 # --------------------------------------------------
 # FastAPI App
 # --------------------------------------------------
-
 app = FastAPI(
-    title="FastAPI Speech To Text",
-    description="Local Whisper Base Multilingual Speech-to-Text Studio",
-    version="2.0.0",
+    title="Audio to Text Converter",
+    description="Convert audio files to text files quickly and locally with lightweight Whisper model (under 200MB).",
+    version="2.1.0",
 )
 
-
-# --------------------------------------------------
-# Directories
-# --------------------------------------------------
-
-os.makedirs("uploads", exist_ok=True)
-os.makedirs("output", exist_ok=True)
-os.makedirs("recordings", exist_ok=True)
-os.makedirs("static", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
-
-
-# --------------------------------------------------
-# Static files & Templates
-# --------------------------------------------------
-
-app.mount(
-    "/static",
-    StaticFiles(directory="static"),
-    name="static",
-)
-
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-
 # --------------------------------------------------
-# Routes: Home & Diagnostics
+# Transcribe Helper
 # --------------------------------------------------
-
-@app.get("/")
-async def home(request: Request):
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-    )
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "message": "Speech-to-text server is running",
-        "timestamp": time.time(),
-        "local_whisper": whisper_available,
-    }
-
-
-@app.get("/api/status")
-async def api_status():
-    if whisper_available:
-        provider = "Local Whisper (Offline)"
-        model = "Whisper Base (Multilingual)"
-    elif openai_client:
-        provider = "Cloud Whisper API"
-        model = "whisper-1"
-    elif sr_available:
-        provider = "Google Speech Recognition"
-        model = "Free Web Engine"
-    else:
-        provider = "Web Speech API"
-        model = "Browser Native"
-
-    return {
-        "ready": bool(whisper_available or openai_client or sr_available),
-        "provider": provider,
-        "model": model,
-        "engine_type": "local" if whisper_available else "cloud",
-        "supported_languages": "99+ Languages (Auto-detect)",
-        "fallback_available": sr_available,
-    }
-
-
-# --------------------------------------------------
-# Local Whisper & Fallback Transcriber Functions
-# --------------------------------------------------
-
-def transcribe_local_whisper(file_path: str, language: Optional[str] = None, task: str = "transcribe"):
-    """Transcribe audio locally using the Whisper 'base' multilingual model."""
+def run_whisper_transcription(file_path: str, language: Optional[str] = None):
+    """Transcribe audio using local faster-whisper."""
     if not whisper_model:
-        raise RuntimeError("Local Whisper model is not loaded.")
+        raise RuntimeError("Whisper model is not initialized.")
 
     lang_param = None
     if language and language.lower() not in ("auto", "auto-detect", ""):
-        lang_param = language.lower().split("-")[0] # e.g. 'en-US' -> 'en', 'es-ES' -> 'es'
+        lang_param = language.lower().split("-")[0]
 
     segments, info = whisper_model.transcribe(
         file_path,
         beam_size=5,
         language=lang_param,
-        task=task,
-        vad_filter=True, # Voice Activity Detection filters background silence
+        vad_filter=True,
     )
 
-    text_parts = []
-    for segment in segments:
-        text_parts.append(segment.text.strip())
-
+    text_parts = [segment.text.strip() for segment in segments]
     full_text = " ".join(text_parts).strip()
+    
     if not full_text:
-        full_text = "[No speech detected in audio]"
+        full_text = "[No clear speech detected in audio]"
 
     return {
         "text": full_text,
-        "language": info.language,
-        "language_probability": round(info.language_probability, 2),
-        "duration": round(info.duration, 2),
+        "language": getattr(info, "language", language or "unknown"),
+        "language_probability": round(getattr(info, "language_probability", 1.0), 2),
+        "duration": round(getattr(info, "duration", 0.0), 2),
     }
 
-
-def transcribe_with_google_fallback(file_path: str) -> str:
-    """Fallback to free Google Web Speech Recognition."""
+def run_google_sr_fallback(file_path: str) -> str:
+    """Fallback using SpeechRecognition library."""
     if not sr_available:
-        raise RuntimeError("SpeechRecognition module is not installed.")
-
-    ext = os.path.splitext(file_path)[1].lower()
-    target_wav_path = file_path
-    temp_wav_path = None
-
-    if ext != ".wav" and sf_available:
-        try:
-            data, samplerate = sf.read(file_path)
-            temp_wav_path = os.path.splitext(file_path)[0] + "_fallback.wav"
-            sf.write(temp_wav_path, data, samplerate, format="WAV")
-            target_wav_path = temp_wav_path
-        except Exception as conv_err:
-            print(f"soundfile conversion error: {conv_err}")
-
+        raise RuntimeError("SpeechRecognition fallback is not available.")
     r = sr.Recognizer()
-    try:
-        with sr.AudioFile(target_wav_path) as source:
-            audio_data = r.record(source)
-            text = r.recognize_google(audio_data)
-            return text
-    except sr.UnknownValueError:
-        return "[No speech detected in audio]"
-    except sr.RequestError as e:
-        raise RuntimeError(f"Google Speech Recognition service error: {e}")
-    finally:
-        if temp_wav_path and os.path.exists(temp_wav_path):
-            try:
-                os.remove(temp_wav_path)
-            except Exception:
-                pass
-
+    with sr.AudioFile(file_path) as source:
+        audio_data = r.record(source)
+        return r.recognize_google(audio_data)
 
 # --------------------------------------------------
-# Audio Upload & Transcribe Endpoint
+# Routes
 # --------------------------------------------------
+@app.get("/")
+async def home(request: Request):
+    """Render the simple audio-to-text conversion UI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "max_size_mb": MAX_FILE_SIZE_MB,
+            "engine_status": "Local Whisper (Ready)" if whisper_available else ("Cloud API (Ready)" if openai_client else "Offline Fallback"),
+            "model_size": "< 200 MB (Optimized)",
+        }
+    )
 
+@app.get("/health")
+async def health():
+    return {
+        "status": "online",
+        "whisper_local": whisper_available,
+        "max_upload_size_mb": MAX_FILE_SIZE_MB,
+        "model": "Whisper base int8 (~140MB)",
+    }
+
+@app.post("/convert")
 @app.post("/transcribe")
-async def transcribe_audio(
+async def convert_audio_to_text(
     file: UploadFile = File(...),
     language: Optional[str] = Form("auto"),
-    task: Optional[str] = Form("transcribe"),
 ):
+    """Convert an uploaded audio file (up to 200MB) directly into a text file."""
     if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No audio file selected.",
-        )
+        raise HTTPException(status_code=400, detail="No audio file was selected.")
 
-    allowed_extensions = {
-        ".mp3",
-        ".wav",
-        ".m4a",
-        ".webm",
-        ".mp4",
-        ".mpeg",
-        ".mpga",
-        ".ogg",
-        ".flac",
+    allowed_exts = {
+        ".mp3", ".mpeg",".wav", ".m4a", ".ogg", ".flac",
+        ".webm", ".aac", ".mp4", ".wma", ".opus"
     }
+    
+    ext = os.path.splitext(file.filename)[1].lower()
+    if not ext:
+        ext = ".wav"
 
-    extension = os.path.splitext(file.filename)[1].lower()
-    if not extension:
-        extension = ".wav"
-
-    if extension not in allowed_extensions:
+    if ext not in allowed_exts:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported audio format: '{extension}'. Allowed: {', '.join(allowed_extensions)}",
+            detail=f"Unsupported format '{ext}'. Supported: {', '.join(allowed_exts)}",
         )
 
-    # Save uploaded audio file
-    safe_basename = "".join([c for c in os.path.splitext(file.filename)[0] if c.isalnum() or c in (' ', '-', '_')]).rstrip()
-    if not safe_basename:
-        safe_basename = f"audio_{int(time.time())}"
+    clean_stem = "".join(c for c in os.path.splitext(file.filename)[0] if c.isalnum() or c in ("-", "_", " ")).strip()
+    if not clean_stem:
+        clean_stem = "audio_converted"
 
-    temp_filename = f"{safe_basename}_{int(time.time())}{extension}"
-    upload_path = os.path.join("uploads", temp_filename)
+    timestamp = int(time.time())
+    temp_audio_name = f"{clean_stem}_{timestamp}{ext}"
+    temp_audio_path = os.path.join(UPLOAD_DIR, temp_audio_name)
 
     start_time = time.time()
+    total_bytes = 0
 
     try:
-        with open(upload_path, "wb") as buffer:
+        # Stream file to disk and enforce 200MB limit
+        with open(temp_audio_path, "wb") as buffer:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_FILE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_MB}MB.",
+                    )
                 buffer.write(chunk)
 
-        text = ""
-        detected_lang = "auto"
-        lang_prob = 1.0
-        engine_used = "Local Whisper Base (Multilingual)"
+        transcribed_text = ""
+        detected_lang = language or "auto"
+        engine_used = "Whisper Base (Local int8)"
 
-        # 1. PRIMARY: Local Whisper Base Multilingual Model
+        # 1. Try local Whisper
         if whisper_available:
             try:
-                whisper_result = transcribe_local_whisper(
-                    upload_path,
-                    language=language,
-                    task=task or "transcribe",
-                )
-                text = whisper_result["text"]
-                detected_lang = whisper_result["language"]
-                lang_prob = whisper_result["language_probability"]
-                engine_used = f"Local Whisper Base ({detected_lang.upper()})"
-            except Exception as w_err:
-                print(f"Local Whisper transcription error: {w_err}")
+                res = run_whisper_transcription(temp_audio_path, language=language)
+                transcribed_text = res["text"]
+                detected_lang = res["language"]
+            except Exception as we:
+                print(f"Whisper transcription failed: {we}")
 
-        # 2. SECONDARY: Google Speech Recognition Fallback
-        if not text and sr_available:
+        # 2. Try Google fallback
+        if not transcribed_text and sr_available and ext == ".wav":
             try:
-                text = transcribe_with_google_fallback(upload_path)
-                engine_used = "Google Speech Fallback (Free)"
-            except Exception as g_err:
-                print(f"Google speech fallback error: {g_err}")
+                transcribed_text = run_google_sr_fallback(temp_audio_path)
+                engine_used = "Google Web Speech"
+            except Exception as ge:
+                print(f"Google speech fallback failed: {ge}")
 
-        # 3. TERTIARY: Cloud OpenAI if configured
-        if not text and openai_client:
+        # 3. Try Cloud API fallback
+        if not transcribed_text and openai_client:
             try:
-                with open(upload_path, "rb") as af:
+                with open(temp_audio_path, "rb") as af:
                     c_res = openai_client.audio.transcriptions.create(
                         model="whisper-1",
                         file=af,
                     )
-                text = c_res.text
+                transcribed_text = c_res.text
                 engine_used = "Cloud Whisper API"
-            except Exception as c_err:
-                print(f"Cloud fallback error: {c_err}")
+            except Exception as ce:
+                print(f"Cloud API transcription failed: {ce}")
 
-        if not text:
+        if not transcribed_text:
             raise HTTPException(
                 status_code=500,
-                detail="Could not extract speech from audio file. Please check audio quality.",
+                detail="Could not extract text from the audio. Please verify the audio has clear speech.",
             )
 
-        duration = round(time.time() - start_time, 2)
-        txt_filename = f"{safe_basename}_{int(time.time())}.txt"
-        txt_path = os.path.join("output", txt_filename)
+        # Save to Text (.txt) File
+        txt_filename = f"{clean_stem}_{timestamp}.txt"
+        txt_path = os.path.join(OUTPUT_DIR, txt_filename)
 
-        with open(txt_path, "w", encoding="utf-8") as text_file:
-            text_file.write(text)
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(transcribed_text)
 
-        word_count = len(text.split()) if text else 0
-        char_count = len(text) if text else 0
+        processing_duration = round(time.time() - start_time, 2)
+        words = len(transcribed_text.split())
+        chars = len(transcribed_text)
+        file_size_mb = round(total_bytes / (1024 * 1024), 2)
 
         return {
             "success": True,
-            "filename": txt_filename,
-            "text": text,
-            "detected_language": detected_lang,
-            "language_probability": lang_prob,
-            "word_count": word_count,
-            "char_count": char_count,
-            "duration_seconds": duration,
-            "engine": engine_used,
+            "text": transcribed_text,
+            "txt_filename": txt_filename,
             "download_url": f"/download/{txt_filename}",
+            "stats": {
+                "detected_language": str(detected_lang).upper(),
+                "word_count": words,
+                "char_count": chars,
+                "file_size_mb": file_size_mb,
+                "process_time_sec": processing_duration,
+                "engine": engine_used,
+            }
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        print("Unexpected transcription exception:", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Transcription error: {str(e)}",
-        )
+        print(f"Unhandled error in convert_audio_to_text: {e}")
+        raise HTTPException(status_code=500, detail=f"Conversion error: {str(e)}")
 
     finally:
-        # Cleanup uploaded audio file
-        if os.path.exists(upload_path):
+        # Clean up temporary uploaded audio
+        if os.path.exists(temp_audio_path):
             try:
-                os.remove(upload_path)
+                os.remove(temp_audio_path)
             except Exception:
                 pass
 
-
-# --------------------------------------------------
-# Download Transcribed Text
-# --------------------------------------------------
-
 @app.get("/download/{filename}")
-async def download_text(filename: str):
-    safe_filename = os.path.basename(filename)
-    file_path = os.path.join("output", safe_filename)
+async def download_text_file(filename: str):
+    """Download the converted text (.txt) file."""
+    safe_name = os.path.basename(filename)
+    file_path = os.path.join(OUTPUT_DIR, safe_name)
 
     if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=404,
-            detail="Transcribed text file not found.",
-        )
+        raise HTTPException(status_code=404, detail="Text file not found.")
 
     return FileResponse(
         path=file_path,
         media_type="text/plain; charset=utf-8",
-        filename=safe_filename,
+        filename=safe_name,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
     )
-
-
-# --------------------------------------------------
-# Live WebSocket Streaming
-# --------------------------------------------------
-
-@app.websocket("/ws/live")
-async def live_transcription(websocket: WebSocket):
-    await websocket.accept()
-    print("Live WebSocket connected.")
-
-    audio_buffer = bytearray()
-
-    try:
-        while True:
-            message = await websocket.receive()
-            
-            if "bytes" in message and message["bytes"]:
-                chunk = message["bytes"]
-                audio_buffer.extend(chunk)
-                
-                await websocket.send_json({
-                    "type": "audio_ack",
-                    "bytes_received": len(audio_buffer),
-                    "status": "recording",
-                })
-
-            elif "text" in message and message["text"]:
-                try:
-                    import json
-                    payload = json.loads(message["text"])
-                    action = payload.get("action")
-                    
-                    if action == "ping":
-                        await websocket.send_json({"type": "pong", "time": time.time()})
-                    elif action in ("flush", "finish"):
-                        if len(audio_buffer) > 1000:
-                            temp_path = os.path.join("recordings", f"ws_{int(time.time())}.wav")
-                            with open(temp_path, "wb") as f:
-                                f.write(audio_buffer)
-                            
-                            res_text = ""
-                            if whisper_available:
-                                try:
-                                    w_res = transcribe_local_whisper(temp_path)
-                                    res_text = w_res["text"]
-                                except Exception as we:
-                                    print(f"WS Whisper error: {we}")
-
-                            if not res_text and sr_available:
-                                try:
-                                    res_text = transcribe_with_google_fallback(temp_path)
-                                except Exception:
-                                    pass
-
-                            await websocket.send_json({
-                                "type": "transcription",
-                                "text": res_text or "[Speech processing completed]",
-                            })
-
-                            if os.path.exists(temp_path):
-                                os.remove(temp_path)
-                            audio_buffer.clear()
-                        else:
-                            audio_buffer.clear()
-                except Exception as parse_err:
-                    print(f"WS text handle error: {parse_err}")
-
-    except WebSocketDisconnect:
-        print("Live WebSocket disconnected.")
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        try:
-            await websocket.close()
-        except Exception:
-            pass
