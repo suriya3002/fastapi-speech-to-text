@@ -1,17 +1,28 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Upgrade base packages to patch security vulnerabilities & install dependencies
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     ffmpeg \
     libgomp1 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Create non-root user and necessary writable directories for security compliance
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/uploads /app/output && \
+    chown -R appuser:appuser /app
+
+USER appuser
 
 # Multi-threading & CPU environment flags
 ENV OMP_NUM_THREADS=4
