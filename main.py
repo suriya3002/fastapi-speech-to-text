@@ -15,6 +15,7 @@ from fastapi import (
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 # --------------------------------------------------
@@ -41,6 +42,7 @@ whisper_model = None
 whisper_available = False
 
 try:
+    # pyrefly: ignore [missing-import]
     from faster_whisper import WhisperModel
     print("Loading lightweight Whisper 'base' model (CPU int8, ~140MB)...")
     whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -52,6 +54,7 @@ except Exception as e:
 
 # Fallback Google Speech Recognition if faster-whisper fails
 try:
+    # pyrefly: ignore [missing-import]
     import speech_recognition as sr
     sr_available = True
 except ImportError:
@@ -66,6 +69,7 @@ openai_client = None
 
 if API_KEY:
     try:
+        # pyrefly: ignore [missing-import]
         from openai import OpenAI
         if API_KEY.startswith("sk-or-") or OPENROUTER_API_KEY:
             openai_client = OpenAI(api_key=API_KEY, base_url="https://openrouter.ai/api/v1")
@@ -102,7 +106,7 @@ def run_whisper_transcription(file_path: str, language: Optional[str] = None):
 
     segments, info = whisper_model.transcribe(
         file_path,
-        beam_size=5,
+        beam_size=1,
         language=lang_param,
         vad_filter=True,
     )
