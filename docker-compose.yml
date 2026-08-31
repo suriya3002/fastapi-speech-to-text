@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  whisper-service:
+    build: .
+    container_name: whisper_fastapi
+    ports:
+      - "8000:8000"
+    ipc: host
+    environment:
+      - WHISPER_MODEL=base.en
+      - WHISPER_COMPUTE_TYPE=int8
+      - WHISPER_THREADS=4
+    volumes:
+      - ./output:/app/output
