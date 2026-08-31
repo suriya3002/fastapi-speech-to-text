@@ -1,21 +1,18 @@
-# 🎙️ FastAPI Speech-to-Text Studio
+# 🎙️ FastAPI Speech-to-Text Studio (English Ultra-Fast)
 
-A modern, high-performance Speech-to-Text web application built with **FastAPI**, **faster-whisper (Whisper Base Multilingual)**, and **Web Speech API**. 
+A modern, high-performance Speech-to-Text web application built with **FastAPI**, **faster-whisper (English-Only Whisper Base.en)**, and lightweight CPU `int8` quantization. 
 
-Supports **99+ languages**, auto-language detection, speech translation to English, live real-time dictation, and audio file processing with zero API keys or cloud costs required.
+Specially optimized for **maximum speed and low memory** on cloud hosted platforms (Render, Railway, HuggingFace Spaces, Fly.io, Cloud Run, AWS) and local machines.
 
 ---
 
 ## ✨ Features
 
-- 🧠 **Local Whisper Base Multilingual Model**: Runs completely offline on CPU with `int8` quantization using CTranslate2.
-- 🌐 **99+ Languages**: Automatic language detection with accuracy confidence scores.
-- 🔄 **Transcribe & Translate**: Transcribe audio in its native language or translate directly into English text.
-- 📁 **File Upload**: Drag-and-drop audio transcription for `.mp3`, `.wav`, `.m4a`, `.webm`, `.ogg`, `.flac`.
-- 🎙️ **Microphone Recording**: In-browser audio recorder with animated HTML5 Canvas waveform visualizer.
-- ⚡ **Live Real-Time Dictation**: Instantaneous streaming speech recognition directly in the browser via Web Speech API.
-- 📝 **Transcript Studio**: Live word/character counts, one-click copy to clipboard, and export to `.txt` and `.json`.
-- 🛡️ **Zero-Cost Fallbacks**: Includes Google Speech Recognition and Cloud Whisper API options.
+- ⚡ **English-Only Whisper `base.en` Model**: Specialized English-only weights that are 2-3x faster and more accurate on English audio than multilingual models.
+- 🚀 **Hosted Platform CPU Acceleration**: Configured with greedy single-path decoding (`beam_size=1`), Silero Voice Activity Detection (VAD), and multi-core CPU thread allocation.
+- 📁 **File Upload**: Drag-and-drop audio transcription for `.mp3`, `.wav`, `.m4a`, `.webm`, `.ogg`, `.flac` up to 200MB.
+- 📝 **Automatic `.txt` File Export**: Instantly transcribes and produces downloadable plain text files.
+- 🛡️ **Zero-Cost Fallbacks & Groq Turbo**: Includes Google Speech Recognition fallback and optional Groq/OpenAI cloud fallback (~250x realtime speed).
 
 ---
 

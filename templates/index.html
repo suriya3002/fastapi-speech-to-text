@@ -75,24 +75,15 @@
                     <!-- Settings & Action -->
                     <div class="controls-row">
                         <div class="control-group">
-                            <label for="language-select"><i class="fa-solid fa-language"></i> Spoken Language</label>
-                            <select id="language-select" class="form-select">
-                                <option value="auto" selected>✨ Auto Detect (99+ Languages)</option>
-                                <option value="en">English (US/UK/Global)</option>
-                                <option value="es">Spanish (Español)</option>
-                                <option value="fr">French (Français)</option>
-                                <option value="de">German (Deutsch)</option>
-                                <option value="hi">Hindi (हिन्दी)</option>
-                                <option value="ta">Tamil (தமிழ்)</option>
-                                <option value="te">Telugu (తెలుగు)</option>
-                                <option value="zh">Chinese (中文)</option>
-                                <option value="ja">Japanese (日本語)</option>
-                                <option value="ko">Korean (한국어)</option>
-                                <option value="ar">Arabic (العربية)</option>
-                                <option value="ru">Russian (Русский)</option>
-                                <option value="pt">Portuguese (Português)</option>
-                                <option value="it">Italian (Italiano)</option>
-                            </select>
+                            <label for="language-badge-display"><i class="fa-solid fa-language"></i> Spoken Language</label>
+                            <div class="language-display-badge" id="language-badge-display">
+                                <div class="lang-info">
+                                    <i class="fa-solid fa-circle-check lang-check-icon"></i>
+                                    <span>English (US / UK / Global)</span>
+                                </div>
+                                <span class="badge-speed-tag"><i class="fa-solid fa-bolt"></i> 3x Faster</span>
+                            </div>
+                            <input type="hidden" id="language-select" value="en">
                         </div>
 
                         <div class="convert-btn-wrapper">

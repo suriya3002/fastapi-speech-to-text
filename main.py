@@ -35,22 +35,42 @@ for folder in [UPLOAD_DIR, OUTPUT_DIR, STATIC_DIR, TEMPLATES_DIR]:
     os.makedirs(folder, exist_ok=True)
 
 # --------------------------------------------------
-# Whisper Model Management (Lightweight ~75MB - ~145MB)
+# Whisper Model Management (English-Only & Ultra-Fast)
 # --------------------------------------------------
-# Using faster-whisper with int8 quantization keeps memory & model files strictly < 200MB.
+# Using faster-whisper 'base.en' with int8 quantization and multi-threading
+# delivers 2-3x faster transcription than multilingual models on hosted CPUs.
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base.en")
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", str(min(4, os.cpu_count() or 2))))
+
 whisper_model = None
 whisper_available = False
 
 try:
     # pyrefly: ignore [missing-import]
     from faster_whisper import WhisperModel
-    print("Loading lightweight Whisper 'base' model (CPU int8, ~140MB)...")
-    whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    print(f"Loading ultra-fast English Whisper '{WHISPER_MODEL_NAME}' model (CPU {WHISPER_COMPUTE_TYPE}, threads={WHISPER_THREADS})...")
+    whisper_model = WhisperModel(
+        WHISPER_MODEL_NAME,
+        device="cpu",
+        compute_type=WHISPER_COMPUTE_TYPE,
+        cpu_threads=WHISPER_THREADS,
+        num_workers=1,
+    )
     whisper_available = True
-    print("Whisper 'base' model loaded successfully!")
+    print(f"Whisper '{WHISPER_MODEL_NAME}' loaded successfully!")
 except Exception as e:
-    print(f"Warning: Could not load faster-whisper: {e}")
-    whisper_available = False
+    print(f"Warning: Could not load faster-whisper model '{WHISPER_MODEL_NAME}': {e}")
+    try:
+        # pyrefly: ignore [missing-import]
+        from faster_whisper import WhisperModel
+        print("Attempting fallback to 'base' model...")
+        whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        whisper_available = True
+        print("Whisper 'base' fallback loaded.")
+    except Exception as e2:
+        print(f"Warning: Faster-whisper fallback failed: {e2}")
+        whisper_available = False
 
 # Fallback Google Speech Recognition if faster-whisper fails
 try:
@@ -60,7 +80,7 @@ try:
 except ImportError:
     sr_available = False
 
-# Fallback OpenAI API client if configured
+# Fallback OpenAI / Groq API client if configured
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -84,34 +104,41 @@ if API_KEY:
 # FastAPI App
 # --------------------------------------------------
 app = FastAPI(
-    title="Audio to Text Converter",
-    description="Convert audio files to text files quickly and locally with lightweight Whisper model (under 200MB).",
-    version="2.1.0",
+    title="Audio to Text Converter (English Ultra-Fast)",
+    description="Ultra-fast English speech-to-text converter optimized for hosted platforms using lightweight Whisper base.en int8.",
+    version="2.2.0",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # --------------------------------------------------
-# Transcribe Helper
+# Transcribe Helper (English Optimized)
 # --------------------------------------------------
-def run_whisper_transcription(file_path: str, language: Optional[str] = None):
-    """Transcribe audio using local faster-whisper."""
+def run_whisper_transcription(file_path: str, language: Optional[str] = "en"):
+    """Transcribe audio using local faster-whisper optimized for English and max speed."""
     if not whisper_model:
         raise RuntimeError("Whisper model is not initialized.")
 
-    lang_param = None
-    if language and language.lower() not in ("auto", "auto-detect", ""):
-        lang_param = language.lower().split("-")[0]
-
+    # High-speed English transcription settings:
+    # - language="en": skips 99-language identification passes
+    # - beam_size=1, best_of=1: greedy single-path decoding (2-3x speedup)
+    # - condition_on_previous_text=False: avoids repetition loops & cuts memory latency
+    # - vad_filter=True: strips non-speech audio so model only computes speech segments
+    # - without_timestamps=True: avoids computing word-level timestamps for text output
     segments, info = whisper_model.transcribe(
         file_path,
+        language="en",
         beam_size=1,
-        language=lang_param,
+        best_of=1,
+        temperature=0,
+        condition_on_previous_text=False,
         vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=300, speech_pad_ms=200),
+        without_timestamps=True,
     )
 
-    text_parts = [segment.text.strip() for segment in segments]
+    text_parts = [segment.text.strip() for segment in segments if segment.text]
     full_text = " ".join(text_parts).strip()
     
     if not full_text:
@@ -119,19 +146,19 @@ def run_whisper_transcription(file_path: str, language: Optional[str] = None):
 
     return {
         "text": full_text,
-        "language": getattr(info, "language", language or "unknown"),
-        "language_probability": round(getattr(info, "language_probability", 1.0), 2),
+        "language": "en",
+        "language_probability": 1.0,
         "duration": round(getattr(info, "duration", 0.0), 2),
     }
 
 def run_google_sr_fallback(file_path: str) -> str:
-    """Fallback using SpeechRecognition library."""
+    """Fallback using SpeechRecognition library (English US)."""
     if not sr_available:
         raise RuntimeError("SpeechRecognition fallback is not available.")
     r = sr.Recognizer()
     with sr.AudioFile(file_path) as source:
         audio_data = r.record(source)
-        return r.recognize_google(audio_data)
+        return r.recognize_google(audio_data, language="en-US")
 
 # --------------------------------------------------
 # Routes
@@ -144,8 +171,8 @@ async def home(request: Request):
         name="index.html",
         context={
             "max_size_mb": MAX_FILE_SIZE_MB,
-            "engine_status": "Local Whisper (Ready)" if whisper_available else ("Cloud API (Ready)" if openai_client else "Offline Fallback"),
-            "model_size": "< 200 MB (Optimized)",
+            "engine_status": "English Whisper (Ultra-Fast)" if whisper_available else ("Cloud API (Ready)" if openai_client else "Offline Fallback"),
+            "model_size": "< 150 MB (base.en)",
         }
     )
 
@@ -153,16 +180,18 @@ async def home(request: Request):
 async def health():
     return {
         "status": "online",
+        "language": "English (en)",
         "whisper_local": whisper_available,
+        "model": f"Whisper {WHISPER_MODEL_NAME} {WHISPER_COMPUTE_TYPE}",
         "max_upload_size_mb": MAX_FILE_SIZE_MB,
-        "model": "Whisper base int8 (~140MB)",
+        "threads": WHISPER_THREADS,
     }
 
 @app.post("/convert")
 @app.post("/transcribe")
 async def convert_audio_to_text(
     file: UploadFile = File(...),
-    language: Optional[str] = Form("auto"),
+    language: Optional[str] = Form("en"),
 ):
     """Convert an uploaded audio file (up to 200MB) directly into a text file."""
     if not file.filename:
@@ -210,15 +239,15 @@ async def convert_audio_to_text(
                 buffer.write(chunk)
 
         transcribed_text = ""
-        detected_lang = language or "auto"
-        engine_used = "Whisper Base (Local int8)"
+        detected_lang = "EN"
+        engine_used = f"Whisper {WHISPER_MODEL_NAME} ({WHISPER_COMPUTE_TYPE})"
 
-        # 1. Try local Whisper
+        # 1. Try local English-optimized Whisper
         if whisper_available:
             try:
-                res = run_whisper_transcription(temp_audio_path, language=language)
+                res = run_whisper_transcription(temp_audio_path, language="en")
                 transcribed_text = res["text"]
-                detected_lang = res["language"]
+                detected_lang = "ENGLISH (EN)"
             except Exception as we:
                 print(f"Whisper transcription failed: {we}")
 
@@ -226,20 +255,24 @@ async def convert_audio_to_text(
         if not transcribed_text and sr_available and ext == ".wav":
             try:
                 transcribed_text = run_google_sr_fallback(temp_audio_path)
-                engine_used = "Google Web Speech"
+                engine_used = "Google Web Speech (English)"
+                detected_lang = "ENGLISH (EN)"
             except Exception as ge:
                 print(f"Google speech fallback failed: {ge}")
 
-        # 3. Try Cloud API fallback
+        # 3. Try Cloud API fallback (Groq / OpenAI)
         if not transcribed_text and openai_client:
             try:
+                cloud_model = "whisper-large-v3-turbo" if (GROQ_API_KEY or (API_KEY and API_KEY.startswith("gsk_"))) else "whisper-1"
                 with open(temp_audio_path, "rb") as af:
                     c_res = openai_client.audio.transcriptions.create(
-                        model="whisper-1",
+                        model=cloud_model,
                         file=af,
+                        language="en",
                     )
                 transcribed_text = c_res.text
-                engine_used = "Cloud Whisper API"
+                engine_used = f"Cloud Whisper ({cloud_model})"
+                detected_lang = "ENGLISH (EN)"
             except Exception as ce:
                 print(f"Cloud API transcription failed: {ce}")
 

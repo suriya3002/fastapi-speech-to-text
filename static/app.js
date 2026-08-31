@@ -119,13 +119,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('file', currentFile);
-        formData.append('language', languageSelect.value);
+        formData.append('language', languageSelect ? languageSelect.value : 'en');
 
         // Show Processing Screen
         sectionUpload.classList.add('hidden');
         sectionResult.classList.add('hidden');
         sectionProcessing.classList.remove('hidden');
-        processingStatusText.textContent = 'Transcribing audio into text file with Whisper...';
+        processingStatusText.textContent = 'Transcribing English audio with ultra-fast Whisper AI...';
 
         try {
             const response = await fetch('/convert', {
@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             statWords.textContent = result.stats?.word_count ?? 0;
             statChars.textContent = result.stats?.char_count ?? 0;
-            statLang.textContent = result.stats?.detected_language ?? 'AUTO';
+            statLang.textContent = result.stats?.detected_language ?? 'ENGLISH (EN)';
             statTime.textContent = (result.stats?.process_time_sec ?? 0) + 's';
 
             // Show Result Screen
