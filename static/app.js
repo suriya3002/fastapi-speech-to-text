@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statTime = document.getElementById('stat-time');
 
     let currentFile = null;
-    const MAX_SIZE_MB = 200;
+    const MAX_SIZE_MB = 25;
 
     // Helper: format bytes
     function formatBytes(bytes) {

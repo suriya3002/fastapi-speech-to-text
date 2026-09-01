@@ -12,11 +12,7 @@ ENV/
 # Environment variables & secrets
 .env
 
-# Application uploads and generated outputs
-uploads/*
-!uploads/.gitkeep
-recordings/*
-!recordings/.gitkeep
+# Application generated outputs
 output/*
 !output/.gitkeep
 
